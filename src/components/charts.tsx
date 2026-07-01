@@ -1,10 +1,21 @@
+import React, { useState } from "react";
 import { clamp } from "../utils";
+import type { RiskEvent, RiskLevel } from "../types";
+import { riskClass } from "../utils";
 
+interface TooltipState {
+  show: boolean;
+  x: number;
+  y: number;
+  content: string;
+}
+
+// 1. Line Chart (Fact + Forecast)
 export function LineChart({
   labels,
   series,
   forecast,
-  height = 240,
+  height = 220,
   label,
   unit = ""
 }: {
@@ -15,73 +26,126 @@ export function LineChart({
   label: string;
   unit?: string;
 }) {
+  const [tooltip, setTooltip] = useState<TooltipState>({ show: false, x: 0, y: 0, content: "" });
   const allValues = [...series, ...(forecast ?? [])];
-  const min = Math.min(...allValues) * 0.96;
-  const max = Math.max(...allValues) * 1.04;
-  const width = 720;
-  const padding = 38;
+  const min = Math.min(...allValues) * 0.95;
+  const max = Math.max(...allValues) * 1.05;
+  const width = 640;
+  const padding = 34;
   const totalPoints = allValues.length;
   const xStep = (width - padding * 2) / Math.max(totalPoints - 1, 1);
-  const y = (value: number) => height - padding - ((value - min) / (max - min)) * (height - padding * 2);
-  const x = (index: number) => padding + index * xStep;
-  const actualPath = series.map((value, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(value)}`).join(" ");
+  const y = (val: number) => height - padding - ((val - min) / (max - min)) * (height - padding * 2);
+  const x = (idx: number) => padding + idx * xStep;
+
+  const actualPath = series.map((val, idx) => `${idx === 0 ? "M" : "L"} ${x(idx)} ${y(val)}`).join(" ");
   const forecastStart = series.length - 1;
   const forecastValues = forecast ? [series[series.length - 1], ...forecast] : [];
   const forecastPath = forecastValues
-    .map((value, index) => `${index === 0 ? "M" : "L"} ${x(forecastStart + index)} ${y(value)}`)
+    .map((val, idx) => `${idx === 0 ? "M" : "L"} ${x(forecastStart + idx)} ${y(val)}`)
     .join(" ");
 
+  const handleMouseEnter = (event: React.MouseEvent, val: number, lbl: string) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setTooltip({
+      show: true,
+      x: rect.left + window.scrollX + 10,
+      y: rect.top + window.scrollY - 30,
+      content: `${lbl}: ${val} ${unit}`
+    });
+  };
+
+  const handleMouseLeave = () => {
+    setTooltip({ ...tooltip, show: false });
+  };
+
   return (
-    <div className="chart-scroll" role="img" aria-label={label}>
-      <svg viewBox={`0 0 ${width} ${height}`} className="line-chart">
+    <div className="chart-scroll" style={{ position: "relative" }}>
+      <svg viewBox={`0 0 ${width} ${height}`} className="line-chart-svg">
         <g className="grid-lines">
           {[0, 1, 2, 3].map((tick) => {
             const yy = padding + tick * ((height - padding * 2) / 3);
-            return <line key={tick} x1={padding} x2={width - padding} y1={yy} y2={yy} />;
+            return <line key={tick} className="grid-line" x1={padding} x2={width - padding} y1={yy} y2={yy} />;
           })}
         </g>
-        <path d={actualPath} className="line-actual" />
-        {forecast ? <path d={forecastPath} className="line-forecast" /> : null}
-        {series.map((value, index) => (
-          <g key={`${value}-${index}`}>
-            <circle cx={x(index)} cy={y(value)} r="4.5" className="point-actual" />
-            <text x={x(index)} y={y(value) - 12} textAnchor="middle">
-              {value}
-              {unit}
-            </text>
-          </g>
+        
+        {/* Actual Path */}
+        <path d={actualPath} className="chart-line-actual" />
+        
+        {/* Forecast Path */}
+        {forecast ? <path d={forecastPath} className="chart-line-forecast" /> : null}
+
+        {/* Actual Points */}
+        {series.map((val, idx) => (
+          <circle
+            key={`a-pt-${idx}`}
+            cx={x(idx)}
+            cy={y(val)}
+            r="4.5"
+            className="point-actual"
+            onMouseEnter={(e) => handleMouseEnter(e, val, labels[idx] || "")}
+            onMouseLeave={handleMouseLeave}
+          />
         ))}
+
+        {/* Forecast Points */}
         {forecast
-          ? forecast.map((value, index) => (
-              <g key={`f-${value}-${index}`}>
-                <circle cx={x(series.length + index)} cy={y(value)} r="4.5" className="point-forecast" />
-                <text x={x(series.length + index)} y={y(value) - 12} textAnchor="middle">
-                  {value}
-                  {unit}
-                </text>
-              </g>
-            ))
+          ? forecast.map((val, idx) => {
+              const totalIdx = series.length + idx;
+              const fLabel = `Прогноз +${idx + 1}`;
+              return (
+                <circle
+                  key={`f-pt-${idx}`}
+                  cx={x(totalIdx)}
+                  cy={y(val)}
+                  r="4.5"
+                  className="point-forecast"
+                  onMouseEnter={(e) => handleMouseEnter(e, val, fLabel)}
+                  onMouseLeave={handleMouseLeave}
+                />
+              );
+            })
           : null}
-        {[...labels, ...(forecast ? ["+1", "+2", "+3", "+4"] : [])].slice(0, totalPoints).map((month, index) => (
-          <text key={`${month}-${index}`} className="axis-label" x={x(index)} y={height - 12} textAnchor="middle">
-            {month}
+
+        {/* Axis Labels */}
+        {[...labels, ...(forecast ? ["+1", "+2", "+3", "+4"] : [])].slice(0, totalPoints).map((lbl, idx) => (
+          <text key={`lbl-${idx}`} className="axis-label" x={x(idx)} y={height - 10} textAnchor="middle">
+            {lbl}
           </text>
         ))}
       </svg>
+
       {forecast ? (
-        <div className="chart-legend">
-          <span>
-            <i className="legend-line actual" /> Факт
-          </span>
-          <span>
-            <i className="legend-line forecast" /> Прогноз
-          </span>
+        <div className="chart-legend-wrap">
+          <span className="chart-legend-item"><i className="actual" /> Факт</span>
+          <span className="chart-legend-item"><i className="forecast" /> Прогноз</span>
         </div>
       ) : null}
+
+      {tooltip.show && (
+        <div
+          style={{
+            position: "absolute",
+            left: `${tooltip.x - 30}px`,
+            top: `${tooltip.y - 120}px`,
+            background: "rgba(9,15,12,0.9)",
+            color: "#ffffff",
+            padding: "4px 8px",
+            borderRadius: "4px",
+            fontSize: "0.74rem",
+            fontWeight: "bold",
+            pointerEvents: "none",
+            zIndex: 100,
+            whiteSpace: "nowrap"
+          }}
+        >
+          {tooltip.content}
+        </div>
+      )}
     </div>
   );
 }
 
+// 2. Donut Chart
 export function DonutChart({
   items,
   label
@@ -93,39 +157,39 @@ export function DonutChart({
   let offset = 25;
 
   return (
-    <div className="donut-wrap" role="img" aria-label={label}>
-      <svg viewBox="0 0 160 160" className="donut-chart">
-        <circle cx="80" cy="80" r="54" className="donut-base" />
-        {items.map((item) => {
+    <div className="donut-chart-container" role="img" aria-label={label}>
+      <svg viewBox="0 0 160 160" className="donut-svg">
+        <circle cx="80" cy="80" r="54" className="donut-base-circle" />
+        {items.map((item, idx) => {
           const dash = (item.value / total) * 100;
-          const circle = (
+          const segment = (
             <circle
-              key={item.label}
+              key={`donut-${idx}`}
               cx="80"
               cy="80"
               r="54"
-              className="donut-segment"
+              className="donut-seg-circle"
               stroke={item.color}
               strokeDasharray={`${dash} ${100 - dash}`}
               strokeDashoffset={offset}
             />
           );
           offset -= dash;
-          return circle;
+          return segment;
         })}
-        <text x="80" y="76" textAnchor="middle" className="donut-total">
+        <text x="80" y="76" textAnchor="middle" className="donut-total-text">
           {total}
         </text>
-        <text x="80" y="96" textAnchor="middle" className="donut-label">
+        <text x="80" y="96" textAnchor="middle" className="donut-lbl-text">
           доля
         </text>
       </svg>
-      <div className="donut-legend">
-        {items.map((item) => (
-          <span key={item.label}>
+      <div className="donut-legend-list">
+        {items.map((item, idx) => (
+          <span className="donut-legend-item" key={`leg-${idx}`}>
             <i style={{ backgroundColor: item.color }} />
             {item.label}
-            <b>{item.value}%</b>
+            <strong>{item.value}%</strong>
           </span>
         ))}
       </div>
@@ -133,6 +197,7 @@ export function DonutChart({
   );
 }
 
+// 3. Bar Chart
 export function BarChart({
   items,
   label
@@ -140,26 +205,35 @@ export function BarChart({
   items: { label: string; value: number; target?: number }[];
   label: string;
 }) {
-  const max = Math.max(...items.flatMap((item) => [item.value, item.target ?? 0]));
+  const max = Math.max(...items.flatMap((item) => [item.value, item.target ?? 0]), 1);
 
   return (
-    <div className="bar-chart" role="img" aria-label={label}>
-      {items.map((item) => (
-        <div className="bar-row" key={item.label}>
-          <span>{item.label}</span>
-          <div className="bar-track">
-            {item.target ? (
-              <i className="bar-target" style={{ left: `${(item.target / max) * 100}%` }} title="План" />
-            ) : null}
-            <b style={{ width: `${(item.value / max) * 100}%` }} />
+    <div className="bar-chart-list" role="img" aria-label={label}>
+      {items.map((item, idx) => {
+        const valPct = (item.value / max) * 100;
+        const targetPct = item.target ? (item.target / max) * 100 : null;
+        return (
+          <div className="bar-chart-row" key={`bar-${idx}`}>
+            <span title={item.label}>{item.label}</span>
+            <div className="bar-chart-track">
+              <b className="bar-chart-fill" style={{ width: `${valPct}%` }} />
+              {targetPct !== null ? (
+                <i
+                  className="bar-chart-target-line"
+                  style={{ left: `${targetPct}%` }}
+                  title={`Цель: ${item.target}`}
+                />
+              ) : null}
+            </div>
+            <strong>{item.value}</strong>
           </div>
-          <strong>{item.value}</strong>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
+// 4. Bullet Chart
 export function BulletChart({
   value,
   target,
@@ -191,62 +265,68 @@ export function BulletChart({
   );
 }
 
+// 5. Risk Matrix
 export function RiskMatrix({
   events,
   onSelect
 }: {
   events: { id: string; title: string; probability: number; impact: number; severity: string }[];
-  onSelect?: (id: string) => void;
+  onSelect?: (risk: RiskEvent) => void;
 }) {
   return (
-    <div className="risk-matrix" role="img" aria-label="Матрица риска вероятность и влияние">
-      <span className="matrix-y">Влияние</span>
-      <div className="matrix-grid">
+    <div className="matrix-container">
+      <span className="matrix-label-y">Влияние</span>
+      <div className="matrix-grid-cells">
         {[3, 2, 1].map((impact) =>
           [1, 2, 3, 4, 5].map((probability) => {
-            const eventsInCell = events.filter((event) => event.impact === impact && event.probability === probability);
+            const eventsInCell = events.filter(
+              (event) => event.impact === impact && event.probability === probability
+            );
             const score = impact * probability;
-            const severityClass = score >= 10 ? "matrix-red" : score >= 6 ? "matrix-yellow" : "matrix-green";
+            const severityClass = score >= 10 ? "cell-red" : score >= 6 ? "cell-yellow" : "cell-green";
+            const isDisabled = eventsInCell.length === 0;
+
             return (
               <button
                 key={`${impact}-${probability}`}
-                className={`matrix-cell ${severityClass}`}
-                onClick={() => eventsInCell[0] && onSelect?.(eventsInCell[0].id)}
-                disabled={!eventsInCell.length}
-                aria-label={`Вероятность ${probability}, влияние ${impact}, событий ${eventsInCell.length}`}
+                className={`matrix-grid-cell ${severityClass}`}
+                onClick={() => eventsInCell[0] && onSelect?.(eventsInCell[0] as any)}
+                disabled={isDisabled}
+                title={`Вероятность ${probability}, влияние ${impact}: ${eventsInCell.length} событий`}
               >
-                {eventsInCell.map((event) => (
-                  <span key={event.id} title={event.title}>
-                    {event.title.slice(0, 2)}
-                  </span>
-                ))}
+                {eventsInCell.length > 0 ? (
+                  <span>{eventsInCell.length}</span>
+                ) : (
+                  ""
+                )}
               </button>
             );
           })
         )}
       </div>
-      <span className="matrix-x">Вероятность</span>
+      <span className="matrix-label-x">Вероятность</span>
     </div>
   );
 }
 
+// 6. Sparkline
 export function Sparkline({ values }: { values: number[] }) {
-  const width = 110;
-  const height = 34;
+  const width = 100;
+  const height = 30;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const xStep = width / Math.max(values.length - 1, 1);
   const path = values
-    .map((value, index) => {
-      const x = index * xStep;
-      const y = height - ((value - min) / Math.max(max - min, 1)) * (height - 8) - 4;
-      return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+    .map((val, idx) => {
+      const x = idx * xStep;
+      const y = height - ((val - min) / Math.max(max - min, 1)) * (height - 6) - 3;
+      return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
     })
     .join(" ");
 
   return (
-    <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-      <path d={path} />
+    <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} aria-hidden="true" style={{ width: "100px", height: "30px" }}>
+      <path d={path} fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
